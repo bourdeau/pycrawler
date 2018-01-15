@@ -1,7 +1,8 @@
 from urllib.parse import urlparse
 from client import Client
 from bs4 import BeautifulSoup
-from models import Domain
+from models import Domain, Url
+from mongoengine import DoesNotExist
 
 
 class Crawler():
@@ -17,17 +18,43 @@ class Crawler():
         data = self._get_page_html(domain)
         html = BeautifulSoup(data, 'lxml')
 
+        results = []
+
         for link in html.find_all('a'):
             href = link.get('href')
+            # We only store absolute URL @todo store relative
             if isinstance(href, str) and href.startswith('http'):
-                uri = urlparse(href.strip())
+                href = href.strip()
+                if href not in results:
+                    results.append(href)
 
-                if not Domain.objects(netloc=uri.netloc):
-                    Domain(scheme=uri.scheme, netloc=uri.netloc).save()
+        self._save(results)
+
+    def _save(self, results):
+
+        for href in results:
+            uri = urlparse(href)
+
+            try:
+                domain = Domain.objects.get(netloc=uri.netloc)
+            except DoesNotExist as e:
+                domain = Domain(scheme=uri.scheme, netloc=uri.netloc)
+
+            path = uri.path
+            if not path:
+                path = '/'
+
+            url = Url(path=path)
+            domain.urls.append(url)
+            domain.save()
 
     def run(self):
+            # Fixtures
             if Domain.objects.count() == 0:
-                Domain(scheme='https', netloc='sametmax.com').save()
+                domain = Domain(scheme='http', netloc='sametmax.com')
+                url = Url(path='/')
+                domain.urls.append(url)
+                domain.save()
 
             for domain in Domain.objects:
                 self._find_links(domain)
